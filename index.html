@@ -242,16 +242,31 @@
     coords.push({lat, lon, time: pos.timestamp});
     polyline.addLatLng(point);
 
-    if(lastPos){
+  if (lastPos) {
+      
       const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
-      // evitar jitter muito pequeno
-      if(d >= 0.5){
-        totalMeters += d;
+
+      // Filtro 1 — jitter por distância muito pequena
+      if (d < 3) {
+          log(`Ignorado: jitter ${d.toFixed(2)}m`);
+          return;
       }
-    } else {
-      // primeira posição: centraliza no mapa
+
+      // Filtro 2 — velocidade mínima
+      const dt = (pos.timestamp - lastPos.time) / 1000;
+      const speedMs = d / dt;
+      const speedKmh = speedMs * 3.6;
+
+      if (speedKmh < 0.5) {
+          log(`Ignorado: velocidade baixa ${speedKmh.toFixed(2)} km/h`);
+          return;
+      }
+
+      totalMeters += d;
+  } 
+  else {
       map.setView(point, 17);
-    }
+  }
 
     lastPos = {lat, lon};
     updateUI();
