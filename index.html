@@ -227,114 +227,66 @@
   }
 
   function onPosition(pos) {
-      if (paused) return;
-
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const acc = pos.coords.accuracy;
-      const now = pos.timestamp;
-
-      // --- Filtro 1: precisão mínima ---
-      if (acc > 12) { 
-          log(`Ponto ignorado (precisão ruim): ${acc}m`);
-          return;
-      }
-
-      // ponto atual
-      const point = [lat, lon];
-
-      // Se é o primeiro ponto
-      if (!lastPos) {
-          lastPos = { lat, lon, time: now };
-          map.setView(point, 17);
-          coords.push(lastPos);
-          return;
-      }
-
-      // Distância desde o último ponto
-      const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
-
-      // Tempo desde último ponto
-      const dt = (now - lastPos.time) / 1000;
-      if (dt <= 0) return;
-
-      // Velocidade instantânea
-      const speedMs = d / dt;
-      const speedKmh = speedMs * 3.6;
-
-      // --- Filtro 2: distância mínima ---
-      if (d < acc * 0.8) { 
-          // O GPS está variando menos do que a própria precisão → jitter
-          log(`Ignorado (jitter menor que precisão): d=${d.toFixed(2)}m acc=${acc}`);
-          return;
-      }
-
-      // --- Filtro 3: velocidade mínima real ---
-      if (speedKmh < 1.2) {  
-          // <1.2 km/h = considerando parado
-          log(`Velocidade muito baixa: ${speedKmh.toFixed(2)} km/h → considerado parado`);
-          return;
-      }
-
-      // Se passou nos filtros → movimento REAL
-      totalMeters += d;
-
-      // Salvar ponto
-      coords.push({ lat, lon, time: now });
-      polyline.addLatLng(point);
-
-      lastPos = { lat, lon, time: now };
-      updateUI();
-
-      // --- MARCOS / OBJETIVOS ---
-      handleProgressAndTarget();
-  }
-
     if (paused) return;
 
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
     const acc = pos.coords.accuracy;
+    const now = pos.timestamp;
 
-    // Filtro 1: ignorar baixa precisão
-    if (acc > 15) {
-        log(`Ignorado (precisão ruim): ${acc}m`);
+    // --- Filtro: precisão ---
+    if (acc > 20) {
+        log(`Ignorado (precisão ruim): acc=${acc}`);
         return;
     }
 
-    const now = pos.timestamp;
     const point = [lat, lon];
 
-    if (lastPos) {
-        const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
-        const dt = (now - lastPos.time) / 1000; // segundos
-
-        // Filtro 2: ignorar movimentos < 3m
-        if (d < 3) {
-            log(`Ignorado (jitter): ${d.toFixed(2)}m`);
-            return;
-        }
-
-        // Filtro 3: velocidade mínima
-        const speedMs = d / dt;
-        const speedKmh = speedMs * 3.6;
-
-        if (speedKmh < 0.5) {
-            log(`Ignorado (velocidade baixa): ${speedKmh.toFixed(2)} km/h`);
-            return;
-        }
-
-        totalMeters += d;
-    } else {
+    // --- Primeiro ponto ---
+    if (!lastPos) {
+        lastPos = { lat, lon, time: now };
+        coords.push(lastPos);
+        polyline.addLatLng(point);
         map.setView(point, 17);
+        log("Primeira posição registrada");
+        return;
     }
+
+    // --- Distância entre pontos ---
+    const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
+
+    // Se tempo zerou ou bugou, impede travar
+    const dt = Math.max(1, (now - lastPos.time) / 1000);
+
+    const speedMs = d / dt;
+    const speedKmh = speedMs * 3.6;
+
+    // --- Filtro: jitter proporcional à precisão ---
+    if (d < Math.max(5, acc * 0.8)) {
+        log(`Ignorado (jitter): d=${d.toFixed(2)}, acc=${acc}`);
+        return;
+    }
+
+    // --- Filtro: velocidade mínima real ---
+    if (speedKmh < 1.0) {
+        log(`Ignorado (baixo movimento): ${speedKmh.toFixed(2)} km/h`);
+        return;
+    }
+
+    // --- Movimento válido ---
+    totalMeters += d;
 
     coords.push({ lat, lon, time: now });
     polyline.addLatLng(point);
 
     lastPos = { lat, lon, time: now };
+
     updateUI();
+
+    // alvos e progresso
+    handleProgressAndTarget && handleProgressAndTarget();
 }
+
 
   function speakTime(ms) {
     let totalSeconds = Math.floor(ms / 1000);
