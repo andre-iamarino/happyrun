@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#2b6cb0" />
+  <title>Rastreador - PWA</title>
+
+  <!-- Leaflet (mapa) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-sA+e2F4Qf+Qf6wqjzv0n8rZ5mEwQbVg0u6sGk5e5m0M=" crossorigin=""/>
+
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+
+  <!-- iOS standalone meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+  <header>
+    <h1>Rastreador</h1>
+    <p class="sub">Use a localização do celular para medir distância, tempo e falar o progresso.</p>
+  </header>
+
+  <main>
+    <section id="controls">
+      <button id="startBtn">Iniciar</button>
+      <button id="pauseBtn" disabled>Pausar</button>
+      <button id="stopBtn" disabled>Parar</button>
+      <button id="exportBtn" disabled>Exportar GPX</button>
+    </section>
+
+    <section id="stats">
+      <div><strong>Tempo:</strong> <span id="time">00:00:00</span></div>
+      <div><strong>Distância:</strong> <span id="distance">0 m</span></div>
+      <div><strong>Velocidade:</strong> <span id="speed">0 km/h</span></div>
+      <div><strong>Pace:</strong> <span id="pace">0:00 /km</span></div>
+    </section>
+
+    <section id="map" aria-label="Mapa"></section>
+
+    <section id="log" hidden>
+      <h3>Log</h3>
+      <pre id="logtxt"></pre>
+    </section>
+  </main>
+
+  <footer>
+    <small>Funciona melhor em navegadores modernos (Chrome/Edge/Firefox). iOS Safari tem limitações de geolocation em background.</small>
+  </footer>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1j7k7Gk3X0z0wq0sYxT+6YbFJm1Qqg9g3rGx0P8w=" crossorigin=""></script>
+
+  <script>
+  // --- Config e estado ---
+  let map, polyline, watchId = null;
+  let lastPos = null;
+  let coords = [];
+  let totalMeters = 0;
+  let startTime = null;
+  let timerInterval = null;
+  let paused = false;
+
+  const el = {
+    startBtn: null, pauseBtn: null, stopBtn: null, exportBtn: null,
+    time: null, distance: null, speed: null, pace: null, logtxt: null
+  };
+
+  function log(msg){
+    const now = new Date().toLocaleTimeString();
+    const out = `[${now}] ${msg}\n`;
+    console.log(out);
+    if(el.logtxt){ el.logtxt.textContent += out; }
+  }
+
+  function initMap(){
+    map = L.map('map', { zoomControl: true }).setView([-23.55, -46.63], 13); // default São Paulo
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+    polyline = L.polyline([], { weight: 5 }).addTo(map);
+  }
+
+  // Haversine - retorna metros
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  function formatTime(ms){
+    const s = Math.floor(ms/1000) % 60;
+    const m = Math.floor(ms/60000) % 60;
+    const h = Math.floor(ms/3600000);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+
+  function formatDistance(meters){
+    if(meters < 1000) return `${meters.toFixed(1)} m`;
+    return `${(meters/1000).toFixed(3)} km`;
+  }
+
+  function formatSpeedMetersPerSec(ms){
+    const kmh = ms * 3.6;
+    return kmh.toFixed(2);
+  }
+
+  function calculatePace(totalMeters, elapsedMs){
+    if(totalMeters <= 0) return '0:00 /km';
+    const secsPerKm = (elapsedMs/1000) / (totalMeters/1000);
+    const minutes = Math.floor(secsPerKm/60);
+    const seconds = Math.round(secsPerKm % 60).toString().padStart(2,'0');
+    return `${minutes}:${seconds} /km`;
+  }
+
+  function speak(text){
+    if(!('speechSynthesis' in window)) return;
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'pt-BR';
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utter);
+  }
+
+  function updateUI(){
+    el.distance.textContent = formatDistance(totalMeters);
+    const elapsedMs = Date.now() - startTime;
+    el.time.textContent = formatTime(elapsedMs);
+    // velocidade instantânea média
+    const avgSpeedMs = elapsedMs>0 ? (totalMeters / (elapsedMs/1000)) : 0;
+    el.speed.textContent = `${formatSpeedMetersPerSec(avgSpeedMs)} km/h`;
+    el.pace.textContent = calculatePace(totalMeters, elapsedMs);
+  }
+
+  function onPosition(pos){
+    if(paused) return;
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const acc = pos.coords.accuracy; // metros
+
+    // ignorar leituras com accuracy muito alta
+    if(acc > 30) {
+      log(`Ignorado por baixa precisão: ${acc}m`);
+      return;
+    }
+
+    const point = [lat, lon];
+    coords.push({lat, lon, time: pos.timestamp});
+    polyline.addLatLng(point);
+
+    if(lastPos){
+      const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
+      // evitar jitter muito pequeno
+      if(d >= 0.5){
+        totalMeters += d;
+      }
+    } else {
+      // primeira posição: centraliza no mapa
+      map.setView(point, 17);
+    }
+
+    lastPos = {lat, lon};
+    updateUI();
+  }
+
+  function onError(err){
+    log('Erro geolocation: ' + err.message);
+    alert('Erro de localização: ' + err.message);
+  }
+
+  function startTracking(){
+    if(!('geolocation' in navigator)){
+      alert('Geolocation não disponível neste navegador');
+      return;
+    }
+
+    totalMeters = 0; coords = []; lastPos = null;
+    startTime = Date.now();
+    el.startBtn.disabled = true; el.pauseBtn.disabled = false; el.stopBtn.disabled = false; el.exportBtn.disabled = true;
+    el.logtxt && (el.logtxt.textContent = '');
+
+    // timer UI
+    timerInterval = setInterval(updateUI, 1000);
+
+    // watch position com alta precisão
+    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+      enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
+    });
+
+    speak('Rastreamento iniciado');
+    log('Iniciado');
+  }
+
+  function pauseTracking(){
+    if(watchId !== null){
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      paused = true;
+      clearInterval(timerInterval);
+      el.pauseBtn.textContent = 'Retomar';
+      speak('Pausado');
+      log('Pausado');
+    } else {
+      // retomar
+      paused = false;
+      el.pauseBtn.textContent = 'Pausar';
+      timerInterval = setInterval(updateUI, 1000);
+      watchId = navigator.geolocation.watchPosition(onPosition, onError, { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
+      speak('Retomado');
+      log('Retomado');
+    }
+  }
+
+  function stopTracking(){
+    if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    clearInterval(timerInterval);
+    el.startBtn.disabled = false; el.pauseBtn.disabled = true; el.stopBtn.disabled = true; el.exportBtn.disabled = (coords.length === 0);
+    el.pauseBtn.textContent = 'Pausar';
+    paused = false;
+    speak(`Parado. Distância total ${Math.round(totalMeters)} metros.`);
+    log('Parado');
+  }
+
+  function exportGPX(){
+    if(coords.length === 0) return;
+    const gpxHeader = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RastreadorPWA">\n  <trk><name>Rota exportada</name><trkseg>`;
+    const gpxPoints = coords.map(c => `\n    <trkpt lat="${c.lat}" lon="${c.lon}"><time>${new Date(c.time).toISOString()}</time></trkpt>`).join('');
+    const gpxFooter = `\n  </trkseg></trk>\n</gpx>`;
+    const blob = new Blob([gpxHeader + gpxPoints + gpxFooter], { type: 'application/gpx+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `rota_${Date.now()}.gpx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // --- Inicialização DOM ---
+  document.addEventListener('DOMContentLoaded', () => {
+    el.startBtn = document.getElementById('startBtn');
+    el.pauseBtn = document.getElementById('pauseBtn');
+    el.stopBtn = document.getElementById('stopBtn');
+    el.exportBtn = document.getElementById('exportBtn');
+    el.time = document.getElementById('time');
+    el.distance = document.getElementById('distance');
+    el.speed = document.getElementById('speed');
+    el.pace = document.getElementById('pace');
+    el.logtxt = document.getElementById('logtxt');
+
+    initMap();
+
+    el.startBtn.addEventListener('click', startTracking);
+    el.pauseBtn.addEventListener('click', pauseTracking);
+    el.stopBtn.addEventListener('click', stopTracking);
+    el.exportBtn.addEventListener('click', exportGPX);
+
+    // se houver permissão prévia, sugerir pedir ao usuário para permitir
+    if ('permissions' in navigator && navigator.permissions.query) {
+      navigator.permissions.query({name:'geolocation'}).then(result => {
+        if(result.state === 'denied') log('Geolocation negado: peça permissão nas configurações do navegador');
+      }).catch(()=>{});
+    }
+
+    // registrar service worker (PWA)
+    if('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').then(() => log('Service Worker registrado')).catch(e=>log('SW erro: '+e.message));
+    }
+
+    // iOS: instrução para instalar (quando usado como PWA)
+  });
+  </script>
+</body>
+</html>
+
+
