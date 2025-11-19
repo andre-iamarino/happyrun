@@ -188,7 +188,9 @@
         const partialTimeMs = Date.now() - startTime;
         const partialFormatted = formatTime(partialTimeMs);
 
-        speak(`${nextProgressMark} metros atingidos. Tempo total até agora: ${partialFormatted}`);
+        speak(`${nextProgressMark} metros atingidos.`);
+        speak("Tempo total até agora:");
+        speakTime(partialTimeMs);
         log(`Marco atingido: ${nextProgressMark}m`);
 
         // Preparar próximo marco
@@ -204,12 +206,44 @@
       const totalFmt = formatTime(totalMs);
 
       speak(`Meta final de ${targetDistance} metros alcançada.`);
-      speak(`Tempo total: ${totalFmt}`);
+      speak("Tempo total:");
+      speakTime(totalMs);
 
       log(`Meta final: ${targetDistance}m | Total: ${totalFmt}`);
     }
 
   }
+
+  function speakTime(ms) {
+    let totalSeconds = Math.floor(ms / 1000);
+
+    const hours = Math.floor(totalSeconds / 3600);
+    totalSeconds %= 3600;
+
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    let parts = [];
+
+    if (hours > 0) {
+        parts.push(hours === 1 ? "1 hora" : `${hours} horas`);
+    }
+
+    if (minutes > 0) {
+        parts.push(minutes === 1 ? "1 minuto" : `${minutes} minutos`);
+    }
+
+    if (seconds > 0) {
+        parts.push(seconds === 1 ? "1 segundo" : `${seconds} segundos`);
+    }
+
+    if (parts.length === 0) {
+        parts = ["0 segundos"];
+    }
+
+    speak(parts.join(", "));
+}
+
 
   function onError(err){
     log('Erro geolocation: ' + err.message);
