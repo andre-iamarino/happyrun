@@ -24,7 +24,7 @@
 
   <main>
 
-    <section id="map" class="hidden" aria-label="Mapa"></section>
+    <section id="map" aria-label="Mapa"></section>
 
     <section id="controls">
       
@@ -48,8 +48,6 @@
       <div><strong>Velocidade:</strong> <span id="speed">0 km/h</span></div>
       <div><strong>Pace:</strong> <span id="pace">0:00 /km</span></div>
     </section>
-
-    <section id="map" aria-label="Mapa"></section>
 
     <section id="log" hidden>
       <h3>Log</h3>
@@ -81,7 +79,7 @@
   let targetReached = false;
 
   const el = {
-    startBtn: null, pauseBtn: null, stopBtn: null, exportBtn: null,
+    startBtn: null, pauseBtn: null, stopBtn: null, 
     time: null, distance: null, speed: null, pace: null, logtxt: null
   };
 
@@ -242,7 +240,7 @@
 
     totalMeters = 0; coords = []; lastPos = null;
     startTime = Date.now();
-    el.startBtn.disabled = true; el.pauseBtn.disabled = false; el.stopBtn.disabled = false; el.exportBtn.disabled = true;
+    el.startBtn.disabled = true; el.pauseBtn.disabled = false; el.stopBtn.disabled = false;
     el.logtxt && (el.logtxt.textContent = '');
 
     // timer UI
@@ -281,7 +279,7 @@
   function stopTracking(){
     if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
     clearInterval(timerInterval);
-    el.startBtn.disabled = false; el.pauseBtn.disabled = true; el.stopBtn.disabled = true; el.exportBtn.disabled = (coords.length === 0);
+    el.startBtn.disabled = false; el.pauseBtn.disabled = true; el.stopBtn.disabled = true; 
     el.pauseBtn.textContent = 'Pausar';
     paused = false;
     speak(`Parado. Distância total ${Math.round(totalMeters)} metros.`);
@@ -303,7 +301,6 @@
     el.startBtn = document.getElementById('startBtn');
     el.pauseBtn = document.getElementById('pauseBtn');
     el.stopBtn = document.getElementById('stopBtn');
-    el.exportBtn = document.getElementById('exportBtn');
     el.time = document.getElementById('time');
     el.distance = document.getElementById('distance');
     el.speed = document.getElementById('speed');
@@ -315,7 +312,6 @@
     el.startBtn.addEventListener('click', startTracking);
     el.pauseBtn.addEventListener('click', pauseTracking);
     el.stopBtn.addEventListener('click', stopTracking);
-    el.exportBtn.addEventListener('click', exportGPX);
 
     // se houver permissão prévia, sugerir pedir ao usuário para permitir
     if ('permissions' in navigator && navigator.permissions.query) {
