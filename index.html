@@ -226,67 +226,81 @@
     el.pace.textContent = calculatePace(totalMeters, elapsedMs);
   }
 
-  function onPosition(pos) {
-    if (paused) return;
-
+  function onPosition(pos){
+    if(paused) return;
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    const acc = pos.coords.accuracy;
-    const now = pos.timestamp;
+    const acc = pos.coords.accuracy; // metros
 
-    // --- Filtro: precisão ---
-    if (acc > 20) {
-        log(`Ignorado (precisão ruim): acc=${acc}`);
-        return;
+    // ignorar leituras com accuracy muito alta
+    if(acc > 12) {
+      log(`Ignorado por baixa precisão: ${acc}m`);
+      return;
     }
 
     const point = [lat, lon];
-
-    // --- Primeiro ponto ---
-    if (!lastPos) {
-        lastPos = { lat, lon, time: now };
-        coords.push(lastPos);
-        polyline.addLatLng(point);
-        map.setView(point, 17);
-        log("Primeira posição registrada");
-        return;
-    }
-
-    // --- Distância entre pontos ---
-    const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
-
-    // Se tempo zerou ou bugou, impede travar
-    const dt = Math.max(1, (now - lastPos.time) / 1000);
-
-    const speedMs = d / dt;
-    const speedKmh = speedMs * 3.6;
-
-    // --- Filtro: jitter proporcional à precisão ---
-    if (d < Math.max(5, acc * 0.8)) {
-        log(`Ignorado (jitter): d=${d.toFixed(2)}, acc=${acc}`);
-        return;
-    }
-
-    // --- Filtro: velocidade mínima real ---
-    if (speedKmh < 1.0) {
-        log(`Ignorado (baixo movimento): ${speedKmh.toFixed(2)} km/h`);
-        return;
-    }
-
-    // --- Movimento válido ---
-    totalMeters += d;
-
-    coords.push({ lat, lon, time: now });
+    coords.push({lat, lon, time: pos.timestamp});
     polyline.addLatLng(point);
 
-    lastPos = { lat, lon, time: now };
+  if (lastPos) {
+      
+      const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
 
+      // Filtro 1 — jitter por distância muito pequena
+      if (d < 3) {
+          log(`Ignorado: jitter ${d.toFixed(2)}m`);
+          return;
+      }
+
+      // Filtro 2 — velocidade mínima
+      const dt = (pos.timestamp - lastPos.time) / 1000;
+      const speedMs = d / dt;
+      const speedKmh = speedMs * 3.6;
+
+      if (speedKmh < 0.5) {
+          log(`Ignorado: velocidade baixa ${speedKmh.toFixed(2)} km/h`);
+          return;
+      }
+
+      totalMeters += d;
+  } 
+  else {
+      map.setView(point, 17);
+  }
+
+    lastPos = {lat, lon};
     updateUI();
 
-    // alvos e progresso
-    handleProgressAndTarget && handleProgressAndTarget();
-}
+    // ---- ALCANCE DE PROGRESSO A CADA X METROS ----
+    if (progressStep > 0 && totalMeters >= nextProgressMark && !targetReached) {
+        const partialTimeMs = Date.now() - startTime;
+        const partialFormatted = formatTime(partialTimeMs);
 
+        speak(`${nextProgressMark} metros atingidos.`);
+        speak("Tempo total até agora:");
+        speakTime(partialTimeMs);
+        log(`Marco atingido: ${nextProgressMark}m`);
+
+        // Preparar próximo marco
+        nextProgressMark += progressStep;
+    }
+
+    // --- CHECAR SE A DISTÂNCIA ALVO FOI ATINGIDA ---
+    if (targetDistance > 0 && !targetReached && totalMeters >= targetDistance) {
+      targetReached = true;
+
+      const now = Date.now();
+      const totalMs = now - startTime;
+      const totalFmt = formatTime(totalMs);
+
+      speak(`Meta final de ${targetDistance} metros alcançada.`);
+      speak("Tempo total:");
+      speakTime(totalMs);
+
+      log(`Meta final: ${targetDistance}m | Total: ${totalFmt}`);
+    }
+
+  }
 
   function speakTime(ms) {
     let totalSeconds = Math.floor(ms / 1000);
