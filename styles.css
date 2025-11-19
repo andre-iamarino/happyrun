@@ -4,6 +4,7 @@ body{font-family:Inter, system-ui, -apple-system, 'Helvetica Neue', Arial; margi
 header{padding:16px 20px; background:linear-gradient(90deg,var(--accent),#4c9bd6); color:white}
 header h1{margin:0;font-size:20px}
 .sub{margin:4px 0 0;opacity:0.95}
+.hidden { display: none !important; }
 main{padding:16px; max-width:900px; margin:12px auto}
 #controls{display:flex; gap:8px; flex-wrap:wrap}
 #controls button{padding:10px 14px; font-size:16px; border-radius:8px; border: none; background:var(--accent); color:white}

@@ -23,11 +23,23 @@
   </header>
 
   <main>
+
+    <section id="map" class="hidden" aria-label="Mapa"></section>
+
     <section id="controls">
+      
+      <div id="targetBox">
+        <label>Distância total (m):</label>
+        <input type="number" id="targetDistance" placeholder="ex: 500" min="1">
+      </div>
+      <div id="progressBox">
+        <label>Informar a cada (m):</label>
+        <input type="number" id="progressStep" placeholder="ex: 100" min="1">
+      </div>
+      
       <button id="startBtn">Iniciar</button>
       <button id="pauseBtn" disabled>Pausar</button>
       <button id="stopBtn" disabled>Parar</button>
-      <button id="exportBtn" disabled>Exportar GPX</button>
     </section>
 
     <section id="stats">
@@ -61,6 +73,12 @@
   let startTime = null;
   let timerInterval = null;
   let paused = false;
+  let targetDistance = 0;
+  let reachedTarget = false;
+  let lastTargetTime = 0;
+  let progressStep = 0;
+  let nextProgressMark = 0;
+  let targetReached = false;
 
   const el = {
     startBtn: null, pauseBtn: null, stopBtn: null, exportBtn: null,
@@ -166,6 +184,33 @@
 
     lastPos = {lat, lon};
     updateUI();
+
+    // ---- ALCANCE DE PROGRESSO A CADA X METROS ----
+    if (progressStep > 0 && totalMeters >= nextProgressMark && !targetReached) {
+        const partialTimeMs = Date.now() - startTime;
+        const partialFormatted = formatTime(partialTimeMs);
+
+        speak(`${nextProgressMark} metros atingidos. Tempo total até agora: ${partialFormatted}`);
+        log(`Marco atingido: ${nextProgressMark}m`);
+
+        // Preparar próximo marco
+        nextProgressMark += progressStep;
+    }
+
+    // --- CHECAR SE A DISTÂNCIA ALVO FOI ATINGIDA ---
+    if (targetDistance > 0 && !targetReached && totalMeters >= targetDistance) {
+      targetReached = true;
+
+      const now = Date.now();
+      const totalMs = now - startTime;
+      const totalFmt = formatTime(totalMs);
+
+      speak(`Meta final de ${targetDistance} metros alcançada.`);
+      speak(`Tempo total: ${totalFmt}`);
+
+      log(`Meta final: ${targetDistance}m | Total: ${totalFmt}`);
+    }
+
   }
 
   function onError(err){
@@ -178,6 +223,22 @@
       alert('Geolocation não disponível neste navegador');
       return;
     }
+
+    document.getElementById('map').classList.add('hidden');
+
+    targetDistance = Number(document.getElementById('targetDistance').value) || 0;
+    progressStep = Number(document.getElementById('progressStep').value) || 0;
+
+    targetReached = false;
+
+    // Definir o primeiro marco de progressão
+    if (progressStep > 0) {
+        nextProgressMark = progressStep;
+    }
+
+    targetDistance = Number(document.getElementById('targetDistance').value) || 0;
+    reachedTarget = false;
+    lastTargetTime = Date.now();
 
     totalMeters = 0; coords = []; lastPos = null;
     startTime = Date.now();
@@ -195,6 +256,7 @@
     speak('Rastreamento iniciado');
     log('Iniciado');
   }
+  
 
   function pauseTracking(){
     if(watchId !== null){
@@ -224,19 +286,16 @@
     paused = false;
     speak(`Parado. Distância total ${Math.round(totalMeters)} metros.`);
     log('Parado');
-  }
 
-  function exportGPX(){
-    if(coords.length === 0) return;
-    const gpxHeader = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RastreadorPWA">\n  <trk><name>Rota exportada</name><trkseg>`;
-    const gpxPoints = coords.map(c => `\n    <trkpt lat="${c.lat}" lon="${c.lon}"><time>${new Date(c.time).toISOString()}</time></trkpt>`).join('');
-    const gpxFooter = `\n  </trkseg></trk>\n</gpx>`;
-    const blob = new Blob([gpxHeader + gpxPoints + gpxFooter], { type: 'application/gpx+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `rota_${Date.now()}.gpx`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    document.getElementById('map').classList.remove('hidden');
+
+    // recenter
+    if (coords.length > 0) {
+        const lat = coords[coords.length - 1].lat;
+        const lon = coords[coords.length - 1].lon;
+        map.setView([lat, lon], 16);
+    }
+
   }
 
   // --- Inicialização DOM ---
