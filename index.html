@@ -226,7 +226,70 @@
     el.pace.textContent = calculatePace(totalMeters, elapsedMs);
   }
 
-function onPosition(pos) {
+  function onPosition(pos) {
+      if (paused) return;
+
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = pos.coords.accuracy;
+      const now = pos.timestamp;
+
+      // --- Filtro 1: precisão mínima ---
+      if (acc > 12) { 
+          log(`Ponto ignorado (precisão ruim): ${acc}m`);
+          return;
+      }
+
+      // ponto atual
+      const point = [lat, lon];
+
+      // Se é o primeiro ponto
+      if (!lastPos) {
+          lastPos = { lat, lon, time: now };
+          map.setView(point, 17);
+          coords.push(lastPos);
+          return;
+      }
+
+      // Distância desde o último ponto
+      const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
+
+      // Tempo desde último ponto
+      const dt = (now - lastPos.time) / 1000;
+      if (dt <= 0) return;
+
+      // Velocidade instantânea
+      const speedMs = d / dt;
+      const speedKmh = speedMs * 3.6;
+
+      // --- Filtro 2: distância mínima ---
+      if (d < acc * 0.8) { 
+          // O GPS está variando menos do que a própria precisão → jitter
+          log(`Ignorado (jitter menor que precisão): d=${d.toFixed(2)}m acc=${acc}`);
+          return;
+      }
+
+      // --- Filtro 3: velocidade mínima real ---
+      if (speedKmh < 1.2) {  
+          // <1.2 km/h = considerando parado
+          log(`Velocidade muito baixa: ${speedKmh.toFixed(2)} km/h → considerado parado`);
+          return;
+      }
+
+      // Se passou nos filtros → movimento REAL
+      totalMeters += d;
+
+      // Salvar ponto
+      coords.push({ lat, lon, time: now });
+      polyline.addLatLng(point);
+
+      lastPos = { lat, lon, time: now };
+      updateUI();
+
+      // --- MARCOS / OBJETIVOS ---
+      handleProgressAndTarget();
+  }
+
     if (paused) return;
 
     const lat = pos.coords.latitude;
