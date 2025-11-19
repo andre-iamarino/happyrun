@@ -132,6 +132,8 @@
 
   <script>
   // --- Config e estado ---
+  let movimentoAcumuladoMs = 0;
+  let ultimoInicioMs = 0;
   let map, polyline, watchId = null;
   let lastPos = null;
   let coords = [];
@@ -213,7 +215,10 @@
 
   function updateUI(){
     el.distance.textContent = formatDistance(totalMeters);
-    const elapsedMs = Date.now() - startTime;
+    let elapsedMs = movimentoAcumuladoMs;
+    if (!paused) {
+      elapsedMs += (Date.now() - ultimoInicioMs);
+    }
     el.time.textContent = formatTime(elapsedMs);
     // velocidade instantânea média
     const avgSpeedMs = elapsedMs>0 ? (totalMeters / (elapsedMs/1000)) : 0;
@@ -318,65 +323,107 @@
     alert('Erro de localização: ' + err.message);
   }
 
-  function startTracking(){
-    if(!('geolocation' in navigator)){
-      alert('Geolocation não disponível neste navegador');
-      return;
+  function startTracking() {
+
+    if (!('geolocation' in navigator)) {
+        alert('Geolocation não disponível neste navegador');
+        return;
     }
 
+    // Oculta o mapa durante a corrida
     document.getElementById('map').classList.add('hidden');
 
+    // Lê configurações
     targetDistance = Number(document.getElementById('targetDistance').value) || 0;
     progressStep = Number(document.getElementById('progressStep').value) || 0;
 
+    // Reseta flags
     targetReached = false;
+    reachedTarget = false;
 
-    // Definir o primeiro marco de progressão
+    // Tempo — zera tudo
+    movimentoAcumuladoMs = 0;     // tempo total de movimento até agora
+    ultimoInicioMs = Date.now();  // momento em que iniciou (ou retomou)
+
+    // Distância — zera tudo
+    totalMeters = 0;
+    coords = [];
+    lastPos = null;
+
+    // Progresso
     if (progressStep > 0) {
-        nextProgressMark = progressStep;
+        nextProgressMark = progressStep; // próximo marco de aviso
     }
 
-    targetDistance = Number(document.getElementById('targetDistance').value) || 0;
-    reachedTarget = false;
-    lastTargetTime = Date.now();
+    el.startBtn.disabled = true;
+    el.pauseBtn.disabled = false;
+    el.stopBtn.disabled = false;
 
-    totalMeters = 0; coords = []; lastPos = null;
-    startTime = Date.now();
-    el.startBtn.disabled = true; el.pauseBtn.disabled = false; el.stopBtn.disabled = false;
-    el.logtxt && (el.logtxt.textContent = '');
+    if (el.logtxt) el.logtxt.textContent = '';
 
-    // timer UI
-    timerInterval = setInterval(updateUI, 1000);
+    // Atualização do UI (tempo/distância/pace)
+    timerInterval = setInterval(updateUI, 250);
 
-    // watch position com alta precisão
-    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
-      enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
-    });
+    // Começar a ler posição GPS
+    watchId = navigator.geolocation.watchPosition(
+        onPosition,
+        onError,
+        {
+            enableHighAccuracy: true,
+            maximumAge: 1000,
+            timeout: 10000
+        }
+    );
 
     speak('Rastreamento iniciado');
     log('Iniciado');
-  }
+}
+
+
   
 
-  function pauseTracking(){
-    if(watchId !== null){
-      navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      paused = true;
-      clearInterval(timerInterval);
-      el.pauseBtn.textContent = 'Retomar';
-      speak('Pausado');
-      log('Pausado');
+  function pauseTracking() {
+    if (!paused) {
+        // PAUSANDO AGORA
+        paused = true;
+
+        // para o cronômetro
+        clearInterval(timerInterval);
+
+        // soma o tempo desde o último início
+        movimentoAcumuladoMs += (Date.now() - ultimoInicioMs);
+
+        // para GPS
+        if (watchId !== null) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+        }
+
+        el.pauseBtn.textContent = 'Retomar';
+        speak('Pausado');
+        log('Pausado');
+
     } else {
-      // retomar
-      paused = false;
-      el.pauseBtn.textContent = 'Pausar';
-      timerInterval = setInterval(updateUI, 1000);
-      watchId = navigator.geolocation.watchPosition(onPosition, onError, { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
-      speak('Retomado');
-      log('Retomado');
+        // RETOMAR
+        paused = false;
+
+        // salva o instante de retomada
+        ultimoInicioMs = Date.now();
+
+        // reinicia timer
+        timerInterval = setInterval(updateUI, 250);
+
+        // reinicia GPS
+        watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+          enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
+        });
+
+        el.pauseBtn.textContent = 'Pausar';
+        speak('Retomado');
+        log('Retomado');
     }
-  }
+}
+
 
   function stopTracking(){
     if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
