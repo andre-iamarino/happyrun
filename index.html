@@ -226,81 +226,52 @@
     el.pace.textContent = calculatePace(totalMeters, elapsedMs);
   }
 
-  function onPosition(pos){
-    if(paused) return;
+function onPosition(pos) {
+    if (paused) return;
+
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    const acc = pos.coords.accuracy; // metros
+    const acc = pos.coords.accuracy;
 
-    // ignorar leituras com accuracy muito alta
-    if(acc > 30) {
-      log(`Ignorado por baixa precisão: ${acc}m`);
-      return;
+    // Filtro 1: ignorar baixa precisão
+    if (acc > 15) {
+        log(`Ignorado (precisão ruim): ${acc}m`);
+        return;
     }
 
+    const now = pos.timestamp;
     const point = [lat, lon];
-    coords.push({lat, lon, time: pos.timestamp});
+
+    if (lastPos) {
+        const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
+        const dt = (now - lastPos.time) / 1000; // segundos
+
+        // Filtro 2: ignorar movimentos < 3m
+        if (d < 3) {
+            log(`Ignorado (jitter): ${d.toFixed(2)}m`);
+            return;
+        }
+
+        // Filtro 3: velocidade mínima
+        const speedMs = d / dt;
+        const speedKmh = speedMs * 3.6;
+
+        if (speedKmh < 0.5) {
+            log(`Ignorado (velocidade baixa): ${speedKmh.toFixed(2)} km/h`);
+            return;
+        }
+
+        totalMeters += d;
+    } else {
+        map.setView(point, 17);
+    }
+
+    coords.push({ lat, lon, time: now });
     polyline.addLatLng(point);
 
-  if (lastPos) {
-      
-      const d = haversine(lastPos.lat, lastPos.lon, lat, lon);
-
-      // Filtro 1 — jitter por distância muito pequena
-      if (d < 3) {
-          log(`Ignorado: jitter ${d.toFixed(2)}m`);
-          return;
-      }
-
-      // Filtro 2 — velocidade mínima
-      const dt = (pos.timestamp - lastPos.time) / 1000;
-      const speedMs = d / dt;
-      const speedKmh = speedMs * 3.6;
-
-      if (speedKmh < 0.5) {
-          log(`Ignorado: velocidade baixa ${speedKmh.toFixed(2)} km/h`);
-          return;
-      }
-
-      totalMeters += d;
-  } 
-  else {
-      map.setView(point, 17);
-  }
-
-    lastPos = {lat, lon};
+    lastPos = { lat, lon, time: now };
     updateUI();
-
-    // ---- ALCANCE DE PROGRESSO A CADA X METROS ----
-    if (progressStep > 0 && totalMeters >= nextProgressMark && !targetReached) {
-        const partialTimeMs = Date.now() - startTime;
-        const partialFormatted = formatTime(partialTimeMs);
-
-        speak(`${nextProgressMark} metros atingidos.`);
-        speak("Tempo total até agora:");
-        speakTime(partialTimeMs);
-        log(`Marco atingido: ${nextProgressMark}m`);
-
-        // Preparar próximo marco
-        nextProgressMark += progressStep;
-    }
-
-    // --- CHECAR SE A DISTÂNCIA ALVO FOI ATINGIDA ---
-    if (targetDistance > 0 && !targetReached && totalMeters >= targetDistance) {
-      targetReached = true;
-
-      const now = Date.now();
-      const totalMs = now - startTime;
-      const totalFmt = formatTime(totalMs);
-
-      speak(`Meta final de ${targetDistance} metros alcançada.`);
-      speak("Tempo total:");
-      speakTime(totalMs);
-
-      log(`Meta final: ${targetDistance}m | Total: ${totalFmt}`);
-    }
-
-  }
+}
 
   function speakTime(ms) {
     let totalSeconds = Math.floor(ms / 1000);
